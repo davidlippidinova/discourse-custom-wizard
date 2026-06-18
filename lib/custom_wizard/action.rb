@@ -540,7 +540,7 @@ class CustomWizard::Action
 
   def basic_topic_params
     params = {
-      skip_validations: true,
+      skip_validations: false,
       topic_opts: {
         custom_fields: {
           wizard_submission_id: @wizard.current_submission.id,

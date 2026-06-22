@@ -25,7 +25,7 @@ class CustomWizard::Action
 
     ActiveRecord::Base.transaction { self.send(action["type"].to_sym) }
 
-    @result.handler.enqueue_jobs if creates_post? && @result.success?
+    @result.handler.enqueue_jobs if creates_post? && @result.success? && @result.handler.respond_to?(:enqueue_jobs)
 
     @submission.fields[action["id"]] = @result.output if @result.success? && @result.output.present?
 
@@ -54,8 +54,18 @@ class CustomWizard::Action
       params = acb.call(params, @wizard, @action, @submission)
     end
 
-    if params[:title].present? && params[:raw].present?
-      creator = PostCreator.new(topic_poster, params)
+    unless params[:title].present? && params[:raw].present?
+      log_error("invalid topic params", "title: #{params[:title]}; post: #{params[:raw]}")
+      return
+    end
+
+    poster = topic_poster
+    target_category = params[:category] && Category.find_by(id: params[:category])
+
+    if topic_needs_review?(poster, target_category)
+      enqueue_topic_for_review(poster, params, target_category)
+    else
+      creator = PostCreator.new(poster, params)
       post = creator.create
 
       if creator.errors.present?
@@ -70,8 +80,6 @@ class CustomWizard::Action
         result.handler = creator
         result.output = post.topic.id
       end
-    else
-      log_error("invalid topic params", "title: #{params[:title]}; post: #{params[:raw]}")
     end
   end
 
@@ -717,6 +725,91 @@ class CustomWizard::Action
 
   def creates_post?
     %i[create_topic send_message].include?(action["type"].to_sym)
+  end
+
+  def topic_needs_review?(poster, category)
+    return false if poster.blank? || poster.staff?
+
+    if category &&
+         category.respond_to?(:require_topic_approval?) &&
+         category.require_topic_approval?
+      return true
+    end
+
+    if SiteSetting.respond_to?(:approve_new_topics_unless_allowed_groups)
+      allowed_ids =
+        SiteSetting
+          .approve_new_topics_unless_allowed_groups
+          .to_s
+          .split("|")
+          .map(&:to_i)
+          .reject(&:zero?)
+      if allowed_ids.any? && poster.respond_to?(:in_any_groups?) &&
+           !poster.in_any_groups?(allowed_ids)
+        return true
+      end
+    end
+
+    if SiteSetting.respond_to?(:approve_post_count) &&
+         SiteSetting.approve_post_count.to_i > 0 &&
+         poster.trust_level == TrustLevel[0] &&
+         poster.post_count.to_i < SiteSetting.approve_post_count.to_i
+      return true
+    end
+
+    false
+  end
+
+  def enqueue_topic_for_review(poster, params, category)
+    payload = {
+      raw: params[:raw],
+      title: params[:title],
+      archetype: Archetype.default,
+      category: category&.id,
+      tags: params[:tags],
+    }
+
+    topic_custom_fields = params.dig(:topic_opts, :custom_fields)
+    payload[:custom_fields] = topic_custom_fields if topic_custom_fields.present?
+
+    reviewable_attrs = {
+      payload: payload.compact,
+      category_id: category&.id,
+      reviewable_by_moderator: true,
+    }
+
+    # Recent Discourse versions expect `created_by` to be the system user
+    # and `target_created_by` to be the real author. Fallback for older
+    # Discourse versions where the column does not exist.
+    if ReviewableQueuedPost.column_names.include?("target_created_by_id")
+      reviewable_attrs[:created_by] = Discourse.system_user
+      reviewable_attrs[:target_created_by] = poster
+    else
+      reviewable_attrs[:created_by] = poster
+    end
+
+    reviewable = ReviewableQueuedPost.new(reviewable_attrs)
+
+    if reviewable.save
+      if reviewable.respond_to?(:create_score) &&
+           !reviewable.reviewable_scores.exists?
+        begin
+          reviewable.create_score(Discourse.system_user, :needs_approval)
+        rescue StandardError
+          # create_score signature varies between Discourse versions; ignore
+          # if it fails so the reviewable is still created.
+        end
+      end
+      log_success("topic queued for review", "reviewable_id: #{reviewable.id}")
+      # Topic isn't published yet, so do not redirect to a topic URL.
+      result.output = nil
+      result.success = true
+    else
+      log_error(
+        "failed to queue topic for review",
+        reviewable.errors.full_messages.join(" "),
+      )
+    end
   end
 
   def public_topic_fields

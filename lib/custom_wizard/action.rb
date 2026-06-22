@@ -6,6 +6,8 @@ class CustomWizard::Action
 
   WIZARD_USER = "wizard-user"
 
+  # commento di prova inserito
+
   def initialize(opts)
     @wizard = opts[:wizard]
     @action = opts[:action]

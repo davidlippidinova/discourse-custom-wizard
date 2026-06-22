@@ -47,8 +47,31 @@ export default {
 
         setupEditorMode() {
           if (this.wizardComposer) {
-            this.editorComponent = CustomWizardTextareaEditor;
-            return;
+            // Default the wizard composer to the rich text editor when the
+            // site supports it. Without explicitly initialising
+            // `isRichEditorEnabled` the d-editor toggle starts in an
+            // "undefined" state, which is why the user previously had to
+            // click the MD/Editor switch twice to actually land on the rich
+            // text view.
+            if (
+                this.isRichEditorEnabled === undefined ||
+                this.isRichEditorEnabled === null
+            ) {
+              this.isRichEditorEnabled = !!(
+                  this.siteSettings && this.siteSettings.rich_editor
+              );
+            }
+
+            const result = this._super(...arguments);
+
+            // If we end up in the textarea (Markdown) mode, swap in our
+            // wizard-aware textarea editor so the smart-list bindings keep
+            // working as before.
+            if (!this.isRichEditorEnabled) {
+              this.editorComponent = CustomWizardTextareaEditor;
+            }
+
+            return result;
           }
           return this._super(...arguments);
         },

@@ -109,14 +109,48 @@ export default Component.extend({
   },
 
   _scrollToTop() {
-    schedule("afterRender", () => {
-      const behavior = "auto";
-      window.scrollTo({ top: 0, left: 0, behavior });
+    // The Discourse route already calls scrollTop() once on `didTransition`,
+    // but several things happen *after* that and end up scrolling the page
+    // back down:
+    //   - the composer editor mounts and focuses its textarea, which makes
+    //     the browser scroll the focused element into view;
+    //   - other wizard fields with `autofocus` do the same once rendered;
+    //   - async work (cooked title/description, preview iframe) changes the
+    //     layout height a few hundred ms later.
+    //
+    // To make the new step always start at the top we:
+    //   1. swallow any focus-driven scroll for a short time window after the
+    //      step change by re-pinning the scroll position on every `scroll`
+    //      and `focus` event;
+    //   2. perform several explicit scroll-to-top passes at increasing
+    //      delays, so we win against anything that scrolls asynchronously.
+    const doScroll = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
       const main = document.querySelector("#main-outlet, .wizard-column");
       if (main) {
         main.scrollTop = 0;
       }
-    });
+    };
+
+    const pin = () => doScroll();
+    const onFocusIn = () => {
+      // Run after the browser has applied its own scroll-on-focus.
+      window.requestAnimationFrame(doScroll);
+    };
+
+    window.addEventListener("scroll", pin, { passive: true });
+    document.addEventListener("focusin", onFocusIn, true);
+
+    schedule("afterRender", doScroll);
+    [0, 50, 150, 350, 700].forEach((delay) => discourseLater(doScroll, delay));
+
+    // After ~800ms the new step is fully painted and any pending async
+    // focus/layout work is done: stop pinning so the user can scroll
+    // normally again.
+    discourseLater(() => {
+      window.removeEventListener("scroll", pin);
+      document.removeEventListener("focusin", onFocusIn, true);
+    }, 800);
   },
 
   @observes("step.message")

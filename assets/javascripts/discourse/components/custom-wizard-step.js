@@ -105,6 +105,18 @@ export default Component.extend({
   _stepChanged() {
     this.set("saving", false);
     this.autoFocus();
+    this._scrollToTop();
+  },
+
+  _scrollToTop() {
+    schedule("afterRender", () => {
+      const behavior = "auto";
+      window.scrollTo({ top: 0, left: 0, behavior });
+      const main = document.querySelector("#main-outlet, .wizard-column");
+      if (main) {
+        main.scrollTop = 0;
+      }
+    });
   },
 
   @observes("step.message")

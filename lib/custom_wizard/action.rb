@@ -485,17 +485,54 @@ class CustomWizard::Action
         inputs: action["tags"],
         data: mapper_data,
         user: user,
-        multiple: true,
+        opts: {
+          multiple: true,
+        },
       ).perform
+
+    Rails.logger.info(
+      "[CustomWizard] action_tags raw mapper output (#{output.class}): #{output.inspect}",
+    )
 
     return false if output.blank?
 
-    Array
-      .wrap(output)
-      .flatten
-      .map { |tag| tag.is_a?(String) ? tag.strip : tag }
-      .reject(&:blank?)
-      .uniq
+    tags =
+      Array
+        .wrap(output)
+        .flat_map { |entry| expand_tag_entry(entry) }
+        .reject(&:blank?)
+        .uniq
+
+    Rails.logger.info("[CustomWizard] action_tags resolved tags: #{tags.inspect}")
+
+    return false if tags.blank?
+
+    tags
+  end
+
+  # Fully expands any tag-like value coming out of the Mapper into a flat
+  # array of clean tag-name strings. This guards against the various shapes
+  # the wizard submission may store (string, array, nested array, comma
+  # separated string, hash with name/id, etc.).
+  def expand_tag_entry(entry)
+    case entry
+    when nil
+      []
+    when Array
+      entry.flat_map { |e| expand_tag_entry(e) }
+    when Hash
+      value = entry["name"] || entry["id"] || entry[:name] || entry[:id]
+      expand_tag_entry(value)
+    when Symbol
+      [entry.to_s.strip]
+    when Numeric
+      [entry.to_s]
+    when String
+      entry.split(",").map(&:strip).reject(&:empty?)
+    else
+      str = entry.to_s.strip
+      str.empty? ? [] : [str]
+    end
   end
 
   def add_custom_fields(params = {})

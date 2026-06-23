@@ -32,6 +32,10 @@ class CustomWizard::Mapper
     @data = params[:data] ? params[:data].with_indifferent_access : {}
     @user = params[:user]
     @opts = params[:opts] || {}
+    # Allow well-known options to be passed at top-level for backwards
+    # compatibility with existing call sites (e.g. `multiple: true`).
+    @opts[:multiple] = params[:multiple] if params.key?(:multiple) && !@opts.key?(:multiple)
+    @opts[:with_type] = params[:with_type] if params.key?(:with_type) && !@opts.key?(:with_type)
   end
 
   def perform

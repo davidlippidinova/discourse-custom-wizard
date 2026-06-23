@@ -480,16 +480,22 @@ class CustomWizard::Action
   end
 
   def action_tags
-    output = CustomWizard::Mapper.new(inputs: action["tags"], data: mapper_data, user: user).perform
+    output =
+      CustomWizard::Mapper.new(
+        inputs: action["tags"],
+        data: mapper_data,
+        user: user,
+        multiple: true,
+      ).perform
 
     return false if output.blank?
 
-    if output.is_a?(Array)
-      output.flatten
-    else
-      output.is_a?(String)
-      [*output]
-    end
+    Array
+      .wrap(output)
+      .flatten
+      .map { |tag| tag.is_a?(String) ? tag.strip : tag }
+      .reject(&:blank?)
+      .uniq
   end
 
   def add_custom_fields(params = {})

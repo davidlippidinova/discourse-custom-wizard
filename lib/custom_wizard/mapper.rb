@@ -212,12 +212,18 @@ class CustomWizard::Mapper
   def interpolate(string, opts = { user: true, wizard: true, value: true, template: false })
     return string if string.blank? || string.frozen?
 
-    string.gsub!(/u\{(.*?)\}/) { |match| map_user_field($1) || "" } if opts[:user] && @user.present?
+    if opts[:user] && @user.present?
+      string.gsub!(/u(?:\{|%7B)(.*?)(?:\}|%7D)/i) { |match| map_user_field($1) || "" }
+    end
 
-    string.gsub!(/w\{(.*?)\}/) { |match| recurse(data, [*$1.split(".")]) || "" } if opts[:wizard]
+    if opts[:wizard]
+      string.gsub!(/w(?:\{|%7B)(.*?)(?:\}|%7D)/i) do |match|
+        recurse(data, [*$1.split(".")]) || ""
+      end
+    end
 
     if opts[:value]
-      string.gsub!(/v\{(.*?)\}/) do |match|
+      string.gsub!(/v(?:\{|%7B)(.*?)(?:\}|%7D)/i) do |match|
         attrs = $1.split(":")
         key = attrs.first
         format = attrs.last if attrs.length > 1

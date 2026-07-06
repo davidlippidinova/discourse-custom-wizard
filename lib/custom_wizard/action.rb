@@ -770,7 +770,59 @@ class CustomWizard::Action
     %i[create_topic send_message].include?(action["type"].to_sym)
   end
 
+  # Reasons returned by Discourse's `NewPostManager.post_needs_approval?` that
+  # are based on the *content* or *timing* of a post (e.g. typing too fast or
+  # posting too frequently) rather than on an administrator-configured
+  # moderation policy. A wizard should not force a topic into the review queue
+  # for these, to preserve the plugin's existing behaviour.
+  REVIEW_SKIP_REASONS = %i[skip fast_typer flooding].freeze
+
   def topic_needs_review?(poster, category)
+    return false if poster.blank? || poster.staff?
+
+    # Prefer Discourse's own moderation logic. This is the single source of
+    # truth used for regular posting and therefore honours every configured
+    # moderation policy, including per-category, group based settings such as
+    # "everyone except selected groups" together with the poster's group
+    # membership (which the plugin cannot reliably reproduce on its own).
+    reason = discourse_review_reason(poster, category)
+    return !REVIEW_SKIP_REASONS.include?(reason) unless reason.nil?
+
+    # Fallback heuristic for Discourse versions where the canonical method is
+    # unavailable or raised unexpectedly.
+    legacy_topic_needs_review?(poster, category)
+  end
+
+  # Asks Discourse whether a post by `poster` in `category` would require
+  # approval. Returns a normalised Symbol reason, or nil when the canonical
+  # method could not be used (so the caller can fall back to the heuristic).
+  def discourse_review_reason(poster, category)
+    return nil unless defined?(NewPostManager)
+    return nil unless NewPostManager.respond_to?(:post_needs_approval?)
+
+    args = {}
+    args[:category] = category.id if category
+
+    manager = NewPostManager.new(poster, args)
+    result = NewPostManager.post_needs_approval?(manager)
+
+    case result
+    when Symbol
+      result
+    when true
+      # Older versions may return a plain boolean; treat as a policy reason.
+      :policy
+    when false, nil
+      :skip
+    else
+      nil
+    end
+  rescue StandardError => e
+    log_error("failed to evaluate review policy", e.message)
+    nil
+  end
+
+  def legacy_topic_needs_review?(poster, category)
     return false if poster.blank? || poster.staff?
 
     if category &&

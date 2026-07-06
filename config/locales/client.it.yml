@@ -17,7 +17,7 @@ it:
         one: "%{count} carattere"
         other: "%{count} caratteri"
       quit: "Magari più tardi"
-      done_custom: "Fatto"
+      done_custom: "Procedi"
       back: "Indietro"
       next: "Avanti"
       step: "%{current} di %{total}"
